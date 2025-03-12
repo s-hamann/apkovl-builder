@@ -162,3 +162,30 @@ commands can be used within these functions:
 
 Modules
 -------
+
+### Fetch
+
+This module installs `fetch.sh`, a simple wrapper script around `wget` that
+transparently adds HTTP basic authentication credentials to every request.
+
+The user name and password are taken from the user's `~/.netrc`.
+This file must contain one or more lines of the following format:
+```
+machine <FQDN> login <USER> password <PASSWORD>
+```
+It may also contains a fall back line of the following format:
+```
+default login <USER> password <PASSWORD>
+```
+
+When making a request using `fetch.sh`, the host name in the URL is compared to
+the `FQDN` values in `~/.netrc` to select the appropriate line. If no line match,
+the fall back line is used, if it is present.
+`fetch.sh` will send `USER` as the user name and `PASSWORD` as the password. If
+`PASSWORD` starts with `file://`, it is interpreted as the path to a file
+containing the password.
+
+There should be no need to manually enable the `fetch` module. It will be
+transparently enabled by other modules that require it. However, it is
+necessary to set up the `.netrc` file, possibly using the `files` configuration
+option.

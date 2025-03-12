@@ -1,0 +1,5 @@
+
+setup_fetch() {
+    # Install fetch.sh wget wrapper.
+    add_file "${module_files_dir}/fetch.sh" "/usr/local/bin/"
+}
