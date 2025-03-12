@@ -1,0 +1,164 @@
+APK Overlay Builder
+===================
+
+The purpose of this script is building an overlay archive for
+[Alpine Linux](https://alpinelinux.org/) network boot.
+
+It supports various basic customization options as well as installing packages
+into the overlay, starting services at boot and adding arbitrary custom files.
+It is possible to build cross-architecture overlays if the appropriate
+[QEMU](https://www.qemu.org/) user-mode package is installed and `binfmt` is
+set up correctly.
+
+
+Usage
+-----
+
+```
+build-ovl.sh [-c <path>]
+Alpine overlay build script.
+Options:
+  -c, --config path
+    Read the configuration file at path.
+  -h, --help
+    Show this help message and exit.
+```
+
+Host the resulting `.tar.gz` archive on some web server and point to `apkovl`
+kernel command line parameter to it to make Alpine's initramfs download if and
+set it up as the root file system.
+
+**Important**: This script only works when the build environment runs Alpine
+Linux. It does work in an Alpine-based container, though.
+When running in a container and building a cross-architecture overlay, note
+that QEMU and `binfmt` need to be set up on the host, not inside the container.
+
+
+Configuration
+-------------
+
+The configuration file follows Busybox ash syntax (an extension of POSIX shell
+syntax) and therefore inherits all the powers and limitations of shell
+scripting.
+In the simplest case, it consists of assignments of values to variables in the
+following format (note that spaces around the `=` are not allowed):
+```sh
+variable=value
+```
+
+The following configuration options are respected by the core script.
+[Modules](#modules) add their own options, that are described further below.
+
+* `mirror`  
+  APK mirror URL to use when installing packages.
+  Defaults to the first URL from the builder's `/etc/apk/repositories`.
+* `alpine_release`  
+  Alpine release (i.e. version) to base the overlay on.
+  When using a specific version number, it must start with `v` (e.g. `v3.20`).
+  Default is `latest-stable`.
+* `target_arch`  
+  Install packages for this architecture into the overlay.
+  The builder must be able to run binaries of this architecture.
+  If it is not the builder's native architecture, that means installing the
+  respective QEMU user-mode package and setting up `binfmt` accordingly.
+  Defaults to the architecture from the builder's `/etc/apk/arch`.
+* `output_file`  
+  Path where the resulting overlay archive is saved.
+  Default is `overlay.tar.gz` in the current working directory at runtime.
+* `modules_dir`  
+  Directory containing builder modules.
+  See `modules` below.
+  Default is `modules/` in the same directory, where `build-ovl.sh` is located.
+* `module_files_dir`  
+  Directory containing additional files required by builder modules.
+  Default is `module-files/` in the same directory, where `build-ovl.sh` is located.
+* `files_dirs`  
+  A list of directories containing supplementary files.
+  See `files` below.
+  Default is `files/` in the same directory, where `build-ovl.sh` is located.
+* `root_size`  
+  Size of the running system's tmpfs root file system in MiB.
+  Not set by default, which means that the system determines the size (usually half of the available RAM).
+* `modules`  
+  A list of builder modules to enable.
+  See [Modules](#modules) below for a list.
+  Optional.
+* `pkgs`  
+  A list of Alpine packages to install.
+  Optional.
+* `files`  
+  A list of supplementary file archives to add to the overlay.
+  They must be tar archives and stored in `files_dir`.
+  These archives are extracted into the root directory of the overlay.
+  Files within must therefore be stored with the desired paths, ownership and mode.
+  Optional.
+* `services`  
+  A list of system services to start on boot.
+  Use this to enable services installed by installed packages, for example.
+  Optional.
+* `default_services`  
+  Enable all of Alpine's default services during boot.
+  Default is `false`.
+* `rc_parallel`  
+  Whether to enable OpenRC's `rc_parallel` option in `/etc/rc.conf`.
+  Doing so allows services to start in parallel, which may result in faster startup times.
+  Default is `false`.
+* `hostname`  
+  Host name for the system running from the overlay.
+  Not set by default, which means that the initramfs determines the host name.
+* `timezone`  
+  Time zone to set for the system running from the overlay.
+  Default is the time zone from the builder's `/etc/localtime`.
+* `ntp_servers`  
+  A list of NTP servers to synchronize the system clock with on start up.
+  Setting this value automatically enables the `ntpd` service.
+  If this service is enabled without setting `ntp_servers`, it synchronizes the
+  system clock with it's default server(s).
+* `root_password`  
+  The password to set for the `root` user account within the overlay.
+  May be given in plain text or as a hash in `crypt` format.
+  Note: Passwords starting with `$` are assumed to be in `crypt` format. Plain
+  text password may therefore not start with `$`.
+  By default, no password gets set for the `root` user.
+
+In addition to these variables, the configuration file also supports two hook
+functions, which allow customizing the overlay package further.
+The functions must be named `setup` and `cleanup`.
+Just like the configuration file itself, they are Busybox ash syntax.
+
+The `setup` function runs after all other setup sets have completed, i.e.
+packages are installed, supplementary file archives extracted, etc.
+Its purpose is to make adjustments to the overlay package that can not (easily)
+handled by the configuration options above.
+
+The `cleanup` function runs after all module cleanup function have completed
+but before removing the package manager and other basic Alpine functionality.
+The purpose of the `cleanup` function is to remove unwanted files from the
+overlay in order to reduce its size or limit its functionality.
+
+**Important**: Both function run in the build system environment and therefore have
+full access to it. To access files in the overlay, their paths must be prefixed
+with `$root_dir`!
+
+In addition to the commands installed on the build system, the following custom
+commands can be used within these functions:
+
+* `add_file <source> <destination>`  
+  Adds a file to the overlay.
+  `source` is the path on the build system or the URL of the file to add.
+  `destination` is the path within the overlay package to which the file will
+  be saved.
+* `apk_root <pkg> ...`  
+  Install one or more Alpine packages into the overlay.
+  Prefer using the `pkgs` option, if possible.
+* `erase_pkg <pkg> ...`  
+  Remove one or more installed Alpine packages without formally uninstalling
+  them (and all of their reverse dependencies).
+* `rc_add <service> <runlevel>`  
+  Add the service `service` to the OpenRC runlevel `runlevel`, i.e. make it run
+  at boot.
+  Prefer using the `services` option, if possible.
+
+
+Modules
+-------
