@@ -1,0 +1,130 @@
+# Configuration options and defaults:
+: "${acme_base_dir:=/etc/ssl/uacme/}"
+: "${acme_identities:=}"
+: "${acme_url:=}"
+: "${acme_staging:=false}"
+: "${acme_account_key:=}"
+: "${acme_account_email:=}"
+: "${acme_profile:=}"
+: "${acme_key_type:=}"
+: "${acme_key_bits:=}"
+: "${acme_renew_days:=}"
+: "${acme_hook:?}"
+: "${acme_hook_creds_file:=}"
+
+
+pkgs="${pkgs} uacme"
+
+# Handle conditional module dependencies.
+case "${acme_account_key}" in
+    http://*|https://*|ftp://*) module_depends="fetch" ;;
+esac
+case "${acme_hook_creds_file}" in
+    http://*|https://*|ftp://*) module_depends="fetch" ;;
+esac
+
+# Handle known additional hook script dependencies.
+case "${acme_hook}" in
+    uacme-desec.sh) pkgs="${pkgs} jq curl" ;;
+esac
+
+
+setup_acme() {
+    uacme_args=''
+    if [ -n "${acme_url}" ]; then
+        uacme_args="${uacme_args} --acme-url ${acme_url}"
+    else
+        [ "${acme_staging}" = true ] && uacme_args="${uacme_args} --staging"
+    fi
+    [ -n "${acme_profile}" ] && uacme_args="${uacme_args} --profile ${acme_profile}"
+    [ -n "${acme_key_type}" ] && uacme_args="${uacme_args} --type ${acme_key_type}"
+    [ -n "${acme_key_bits}" ] && uacme_args="${uacme_args} --bits ${acme_key_bits}"
+    [ -n "${acme_renew_days}" ] && uacme_args="${uacme_args} --no-ari --days ${acme_renew_days}"
+    if [ -n "${acme_hook}" ]; then
+        if [ "${acme_hook#*://}" == "${acme_hook}" ] && [ "${acme_hook#/}" == "${acme_hook}" ]; then
+            # $acme_hook is not a URL and not an absolute path.
+            acme_hook="${module_files_dir}/${acme_hook}"
+        fi
+        add_file "${acme_hook}" /etc/ssl/uacme/hook
+        chmod +x -- "${root_dir}/etc/ssl/uacme/hook"
+        uacme_args="${uacme_args} --hook /etc/ssl/uacme/hook"
+    fi
+    cat - > "${root_dir}/etc/init.d/acme" <<EOF
+#!/sbin/openrc-run
+description="UACME certificate management"
+depend() {
+    need net hostname
+    after ntpd persistence
+}
+_cleanup() {
+    rm -rf -- "\${uacme_work_dir}"
+$([ -n "${acme_hook_creds_file}" ] && cat - <<EOS
+    rm -f "/etc/ssl/uacme/$(basename -- "${acme_hook_creds_file}")"
+EOS
+)
+}
+start() {
+    acme_base_dir="${acme_base_dir}"
+    uacme_work_dir="\$(mktemp -d -p /tmp acme.XXXXXX)"
+    trap _cleanup EXIT INT TERM QUIT
+    mkdir -p -- "\${uacme_work_dir}/private/"
+$(if [ -n "${acme_account_key}" ]; then
+    cat - <<EOS
+    account_key="${acme_account_key}"
+    case "\${account_key}" in
+        http://*|https://*|ftp://*)
+            ebegin "Getting ACME account key"
+            HOME=/root /usr/local/bin/fetch.sh "\${account_key}" "\${uacme_work_dir}/private/key.pem"
+            eend \$? || return 1
+            ;;
+        *)
+            ln -nfs "\${account_key}" "\${uacme_work_dir}/private/key.pem" || return 1
+            ;;
+    esac
+EOS
+else
+    cat - <<EOS
+    if [ ! -f "\${acme_base_dir}/private/key.pem" ]; then
+        # Create a new account with the CA.
+        ebegin "Creating new ACME account"
+        /usr/bin/uacme -c "\${acme_base_dir}" --yes ${uacme_args} new ${acme_account_email}
+        eend \$? || return 1
+    fi
+    cp -a -- "\${acme_base_dir}/private/key.pem" "\${uacme_work_dir}/private/key.pem" || return 1
+EOS
+fi
+)
+$([ -n "${acme_hook_creds_file}" ] && cat - <<EOS
+    HOME=/root /usr/local/bin/fetch.sh "${acme_hook_creds_file}" "/etc/ssl/uacme/$(basename -- "${acme_hook_creds_file}")"
+EOS
+)
+    identities="${acme_identities}"
+    if [ -z "\${identities}" ]; then
+        identities="\$(hostname)"
+    fi
+    identifier="\${identities%% *}"
+    if [ -d "\${acme_base_dir}/\${identifier}" ]; then
+        # Copy the existing certificate to the temporary uacme directory so it
+        # can check if the certificate needs to be renewed.
+        # If this fails, uacme will request a new certificate.
+        # We only copy the certificate but not the private key to force uacme
+        # to generate a new key on certificate renewal.
+        cp -a -- "\${acme_base_dir}/\${identifier}" "\${uacme_work_dir}"
+    fi
+    # Issue a new certificate or renew an existing one, if it is due for renewal.
+    ebegin "Issue/renew certificate"
+    /usr/bin/uacme -c "\${uacme_work_dir}" ${uacme_args} issue \${identities}
+    r=\$?
+    [ \$r -eq 1 ] && r=0
+    eend \$r || return 1
+    if [ ! -e "\${acme_base_dir}/\${identifier}/cert.pem" ] || [ "\${uacme_work_dir}/\${identifier}/cert.pem" -nt "\${acme_base_dir}/\${identifier}/cert.pem" ]; then
+        # Copy the certificate and key back to \$acme_base_dir.
+        mkdir -p -- "\${acme_base_dir}/\${identifier}" "\${acme_base_dir}/private/\${identifier}"
+        cp -a -- "\${uacme_work_dir}/\${identifier}/cert.pem" "\${acme_base_dir}/\${identifier}/cert.pem" || return 1
+        cp -a -- "\${uacme_work_dir}/private/\${identifier}/key.pem" "\${acme_base_dir}/private/\${identifier}/key.pem" || return 1
+    fi
+}
+EOF
+    chmod +x "${root_dir}/etc/init.d/acme"
+    rc_add acme default
+}

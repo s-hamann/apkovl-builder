@@ -163,6 +163,77 @@ commands can be used within these functions:
 Modules
 -------
 
+### ACME
+
+This module handles requesting an X.509 certificate from a Certificate
+Authority that supports the ACME protocol. It uses
+[uacme](https://github.com/ndilieto/uacme).
+The certificate is requested on boot only and not renewed later on.
+
+* `acme_base_dir`  
+  The directory where uacme stores the certificate and private key.
+  Refer to [uacme's documentation](https://ndilieto.github.io/uacme/uacme.html)
+  for the sub-directory structure uacme sets up.
+  Enable the [`persistence`](#persistence) module and set `acme_base_dir` to a
+  path below `persistence_mountpoint` in order to keep certificates across
+  reboots. This may significantly reduce boot times.
+  Defaults to `/etc/ssl/uacme/`.
+* `acme_identities`  
+  A list of identities (i.e. DNS names) for which to request a certificate.
+  If not set, a certificate is requested for the system's host name at run
+  time.
+* `acme_url`  
+  The URL of the Certificate Authority's ACMEv2 server directory.
+  If not set, the default is determined by uacme (Let's Encrypt, at the time of
+  this writing).
+* `acme_staging`  
+  Request a certificate from Let's Encrypt's staging environment.
+  This is for testing and ignored if `acme_url` is set.
+  Defaults to `false`.
+* `acme_account_key`  
+  Location of an ACME account private key file in PEM format.
+  May be either a path on the target device or a URL.
+  In the latter case, the key file is retrieved during boot.
+  If getting the key file requires authentication, set up the `root` user's
+  `.netrc` as described in the documentation for the [`fetch`](#fetch) module.
+  If not set, a new account is created on boot. Unless `acme_base_dir` is on
+  persistent storage, this means that a new account is created on each boot.
+* `acme_account_email`  
+  The contact e-mail address for any ACME accounts created by this module.
+  Ignored if `acme_account_key` is set.
+  Optional.
+* `acme_profile`  
+  Request a certificate with this profile from the Certificate Authority.
+  Supported values depend on the Certificate Authority.
+  Optional.
+* `acme_key_type`  
+  The type of key to use for the account key as well as X.509 certificate's
+  private key.
+  One of `RSA` or `EC`.
+  If not set, the default is determined by uacme.
+* `acme_key_bits`  
+  Length of any newly generated keys in bits.
+  Default as well as allowed values depend on `acme_key_type`.
+* `acme_renew_days`  
+  Existing certificates will get renewed on boot if they would expire within
+  this many days.
+  If not set, the ACME server is queried for renewal information.
+* `acme_hook`  
+  Location of a uacme hook script that handles the ACME challenge on
+  certificate issuance or renewal.
+  May be either a path on the building system or a URL.
+  Relative paths are interpreted as relative to the `module_files_dir`.
+  Mandatory.
+* `acme_hook_creds_file`  
+  Location of a file containing credentials required by the `acme_hook` script.
+  May be either a path on the target device or a URL.
+  In the latter case, the credential file is retrieved during boot.
+  If getting the credential file requires authentication, set up the `root`
+  user's `.netrc` as described in the documentation for the [`fetch`](#fetch)
+  module.
+  Optional, but the hook script may not work without credentials.
+
+
 ### Fetch
 
 This module installs `fetch.sh`, a simple wrapper script around `wget` that
