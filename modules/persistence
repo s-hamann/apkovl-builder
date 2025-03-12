@@ -1,0 +1,117 @@
+# Configuration options and defaults:
+: "${persistence_partition:=}"
+: "${persistence_size:=256}"
+: "${persistence_keyfile:=}"
+: "${persistence_high_entropy_key:=false}"
+: "${persistence_luksformat_args:=--type luks2 --use-urandom --sector-size 4096 --cipher xchacha12,aes-adiantum-plain64}"
+: "${persistence_fs:=ext4}"
+: "${persistence_mountpoint:=/mnt/persistence}"
+
+
+if [ -n "${persistence_keyfile}" ]; then
+    pkgs="${pkgs} cryptsetup"
+    case "${persistence_keyfile}" in
+        http://*|https://*|ftp://*) module_depends="fetch" ;;
+    esac
+    if [ "${persistence_high_entropy_key}" = true ]; then
+        persistence_luksformat_args="${persistence_luksformat_args} --pbkdf pbkdf2 --pbkdf-force-iterations 1000"
+    fi
+fi
+case "${persistence_fs}" in
+    btrfs)
+        pkgs="${pkgs} btrfs-progs"
+        mkfs_args="-f -L persistence --csum xxhash"
+        ;;
+    ext2|ext3|ext4)
+        pkgs="${pkgs} e2fsprogs"
+        mkfs_args="-F -L persistence -m 0"
+        ;;
+    xfs)
+        pkgs="${pkgs} xfsprogs"
+        mkfs_args="-f -L persistence"
+        ;;
+esac
+
+
+setup_persistence() {
+    cat - > "${root_dir}/etc/init.d/persistence" <<EOF
+#!/sbin/openrc-run
+description="Set up persistent storage"
+depend() {
+    need root
+    want seedrng
+    after localmount modules
+}
+start() {
+    # Create storage partition.
+    dev="${persistence_partition}"
+    if [ ! -e "\${dev}" ]; then
+        ebegin "Creating persistence partition"
+        start_sector=\$(( \$(fdisk -l "\${dev%p*}" | tail -n1 | awk '{print \$5}') + 1 ))
+        sed -e 's/\s*\([a-zA-Z0-9\+]*\).*/\1/' << EOS | fdisk "\${dev%p*}"
+            n # new partition
+            p # primary partition
+            \${dev##*p} # partition number
+            \${start_sector} # start right after last partition
+            +${persistence_size}M # end position
+            w # write partition table
+        eend \$? || return 1
+EOS
+    fi
+$([ -n "${persistence_keyfile:-}" ] && cat - <<EOS
+    luks_keyfile="${persistence_keyfile:-}"
+    if [ -n "\${luks_keyfile}" ]; then
+        case "\${luks_keyfile}" in
+            http://*|https://*|ftp://*)
+                ebegin "Getting LUKS key"
+                tmpfile="\$(mktemp -p /tmp luks.XXXXXX)"
+                trap "rm -f -- '\${tmpfile}'" EXIT INT TERM QUIT
+                HOME=/root /usr/local/bin/fetch.sh "\${luks_keyfile}" "\${tmpfile}"
+                r=\$?
+                luks_keyfile="\${tmpfile}"
+                eend \$r || return 1
+                ;;
+        esac
+        # Set up a LUKS container.
+        if ! cryptsetup isLuks "\${dev}"; then
+            ebegin "Creating new LUKS container"
+            echo YES | cryptsetup luksFormat ${persistence_luksformat_args:-} "\${dev}" "\${luks_keyfile}"
+            eend \$? || return 1
+        fi
+        # Open the LUKS container.
+        if [ ! -e /dev/mapper/persistence ]; then
+            ebegin "Opening LUKS container"
+            cryptsetup open --type luks2 --allow-discards --key-file "\${luks_keyfile}" --perf-no_read_workqueue --perf-no_write_workqueue "\${dev}" persistence
+            eend \$? || return 1
+        fi
+        dev=/dev/mapper/persistence
+    fi
+EOS
+)
+    # Create file system.
+    fs="\$(blkid "\${dev}" | sed -Ee 's/.*TYPE="([^"]*)".*/\\1/')"
+    if [ "\${fs}" != "${persistence_fs}" ]; then
+        ebegin "Creating ${persistence_fs} file system"
+        mkfs.${persistence_fs} ${mkfs_args} "\${dev}"
+        eend \$? || return 1
+    fi
+    # Mount it.
+    checkpath -d -q "${persistence_mountpoint}"
+    if ! grep -wq "\${dev}" /proc/mounts; then
+        ebegin "Mounting persistence partition"
+        chattr +i "${persistence_mountpoint}"
+        mount -o noatime,nodev "\${dev}" "${persistence_mountpoint}"
+        eend \$? || return 1
+    fi
+}
+stop() {
+    umount "${persistence_mountpoint}"
+$([ -n "${persistence_keyfile:-}" ] && cat - <<EOS
+    cryptsetup close persistence
+EOS
+)
+}
+EOF
+    chmod +x "${root_dir}/etc/init.d/persistence"
+    rc_add persistence boot
+}

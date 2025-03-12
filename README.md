@@ -189,3 +189,44 @@ There should be no need to manually enable the `fetch` module. It will be
 transparently enabled by other modules that require it. However, it is
 necessary to set up the `.netrc` file, possibly using the `files` configuration
 option.
+
+
+### Persistence
+
+This module sets up a partition for persistent storage, i.e. to preserve files
+across reboots. It respects the following configuration options:
+
+* `persistence_partition`  
+  Device name for the persistence partition.
+  It if does not exist on boot, it will be created with the configured parameters.
+  Mandatory.
+* `persistence_size`  
+  The size of the persistence partition in MiB.
+  Defaults to `256`.
+* `persistence_keyfile`  
+  Location of a LUKS key file with which the persistence partition is encrypted.
+  May be either a path on the target device or a URL.
+  In the latter case, the key file is retrieved during boot.
+  If getting the key file requires authentication, set up the `root` user's
+  `.netrc` as described in the documentation for the [`fetch`](#fetch) module.
+  If `persistence_keyfile` is not set, the persistence partition is created and
+  used without encryption.
+  Optional.
+* `persistence_high_entropy_key`  
+  Whether the `persistence_keyfile` contains a strong, high entropy key.
+  If it does, a weak but fast key derivation function is used during LUKS
+  setup. This may significantly reduct boot time on low powered devices.
+  Ignored if `persistence_keyfile` is not set.
+  Defaults to `false`.
+* `persistence_luksformat_args`  
+  Command line argument to pass to `cryptsetup luksFormat` when initially
+  encrypting the persistence partition.
+  Ignored if `persistence_keyfile` is not set.
+  Defaults to `--type luks2 --use-urandom --sector-size 4096 --cipher xchacha12,aes-adiantum-plain64`.
+* `persistence_fs`  
+  The type of file system to create on the persistence partition.
+  Supported file systems are `btrfs`, `ext2`, `ext3`, `ext4` and `xfs`.
+  Defaults to `ext4`.
+* `persistence_mountpoint`  
+  Path where the persistence partition gets mounted.
+  Defaults to `/mnt/persistence`.
