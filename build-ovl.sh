@@ -303,6 +303,7 @@ fi
 # Set the time zone.
 if [ -n "${timezone}" ]; then
     source_file="/usr/share/zoneinfo/${timezone}"
+    del_tzdata=false
     if [ ! -f "${source_file}" ]; then
         del_tzdata=true
         apk_root add --virtual .setup-timezone tzdata
