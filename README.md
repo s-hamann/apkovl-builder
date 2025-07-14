@@ -256,10 +256,36 @@ the fall back line is used, if it is present.
 `PASSWORD` starts with `file://`, it is interpreted as the path to a file
 containing the password.
 
-There should be no need to manually enable the `fetch` module. It will be
-transparently enabled by other modules that require it. However, it is
+Other modules will be transparently enabled the `fetch` module, if they require
+it. In this case, there is no need to enable it manually. However, it is
 necessary to set up the `.netrc` file, possibly using the `files` configuration
 option.
+
+In addition to the `fetch.sh` command, this module optionally also installs a
+system service that can be use to download files on system boot.
+To enable and use it, simply define the files to download as follows:
+
+* `fetch_on_boot`  
+  A space separated list of files to download on boot using `fetch.sh`.
+  Each list item must be formatted like the following:  
+  `url|path|owner|group|mode`  
+  The meaning of these values is:
+  * `url`  
+    The URL from which to download the file.
+    Mandatory.
+  * `path`  
+    The local path where to store the downloaded file.
+    Mandatory.
+  * `owner`  
+    Set the file's owner to this system user.
+    Optional.
+  * `group`  
+    Set the file's group to this system group.
+    Optional.
+  * `mode`  
+    Set the file's access permissions to this value.
+    May be given as symbolic or numeric permission mode.
+    Optional.
 
 
 ### Persistence

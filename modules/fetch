@@ -1,5 +1,13 @@
+# Configuration options and defaults:
+: "${fetch_on_boot:=}"
 
 setup_fetch() {
     # Install fetch.sh wget wrapper.
     add_file "${module_files_dir}/fetch.sh" "/usr/local/bin/"
+    # Install system service that fetches certain files (on boot).
+    if [ -n "${fetch_on_boot}" ]; then
+        echo "files='${fetch_on_boot}'" > "${root_dir}/etc/conf.d/fetch"
+        add_file "${module_files_dir}/fetch.init" "/etc/init.d/fetch"
+        rc_add fetch default
+    fi
 }

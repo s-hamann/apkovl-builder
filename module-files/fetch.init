@@ -1,0 +1,28 @@
+#!/sbin/openrc-run
+description="fetch remote files"
+depend() {
+	need net
+	after persistence
+}
+start() {
+	for item in ${files}; do
+		url="$(printf '%s' "${item}" | cut -d'|' -f1)"
+		file="$(printf '%s' "${item}" | cut -d'|' -f2)"
+		owner="$(printf '%s' "${item}" | cut -d'|' -f3)"
+		group="$(printf '%s' "${item}" | cut -d'|' -f4)"
+		mode="$(printf '%s' "${item}" | cut -d'|' -f5)"
+		ebegin "Fetching ${file} from ${url}"
+		HOME=/root /usr/local/bin/fetch.sh "${url}" "${file}" || { eend $?; continue; }
+		r=0
+		if [ -n "${owner}" ]; then
+			chown -- "${owner}" "${file}" || r="$?"
+		fi
+		if [ -n "${group}" ]; then
+			chgrp -- "${group}" "${file}" || r="$?"
+		fi
+		if [ -n "${mode}" ]; then
+			chmod -- "${mode}" "${file}" || r="$?"
+		fi
+		eend "${r}"
+	done
+}
