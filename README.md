@@ -287,6 +287,31 @@ To enable and use it, simply define the files to download as follows:
     May be given as symbolic or numeric permission mode.
     Optional.
 
+### Firmware Update
+
+This module installs a system service that checks for a firmware update on boot
+and installs it, if necessary.
+Firmware update files must be (possibly compressed) tar archives, suitable for extracting directly onto the mounted firmware partition.
+
+* `firmware_update_partition`  
+  The path of the firmware partition device.
+  As part of the update process, the partition will be mounted and files will
+  be replaced with nwe or changed files from the firmware update archive.
+  On Raspberry Pi systems, A/B firmware partitions will be transparently
+  detected if `autoboot.txt` is on this partition.
+  Defaults to `/dev/mmcblk0p1`.
+* `firmware_update_local_version_file`  
+  The path to a file holding the locally installed firmware version.
+  Relative paths are interpreted as relative to the mounted firmware partition (cf. `firmware_update_partition`).
+  Optional.
+  When not set, a firmware update is done on each boot, regardless if the firmware versions differ or not.
+* `firmware_update_remote_version_url`  
+  A URL that returns the version of the firmware to download and install (if it differs from the local version, cf. `firmware_update_local_version_file`).
+  Mandatory.
+* `firmware_update_url`  
+  The download URL for the latest firmware update package.
+  The placeholder `$version` in the URL will be replaced by the version number returned by `firmware_update_remote_version_url`.
+  Mandatory.
 
 ### Persistence
 

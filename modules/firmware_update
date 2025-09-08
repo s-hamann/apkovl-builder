@@ -1,0 +1,17 @@
+# Configuration options and defaults:
+: "${firmware_update_partition:=/dev/mmcblk0p1}"
+: "${firmware_update_local_version_file:=}"
+: "${firmware_update_remote_version_url:=}"
+: "${firmware_update_url:=}"
+
+setup_firmware_update() {
+    # Install system service that updates the firmware files.
+    add_file "${module_files_dir}/firmware-update.init" "/etc/init.d/firmware-update"
+    rc_add firmware-update default
+    cat - > "${root_dir}/etc/conf.d/firmware-update" << EOC
+    partition='${firmware_update_partition}'
+    local_version_file='${firmware_update_local_version_file}'
+    remote_version_url='${firmware_update_remote_version_url}'
+    update_url='${firmware_update_url}'
+EOC
+}

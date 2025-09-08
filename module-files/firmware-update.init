@@ -1,0 +1,72 @@
+#!/sbin/openrc-run
+description="update system firmware"
+depend() {
+	need net
+	after all
+}
+start() {
+	tmpdir="$(mktemp -d -p /tmp fwupdate.XXXXXX)"
+	trap 'mountpoint -q -- "${tmpdir}/boot" && umount -- "${tmpdir}/boot"; rm -rf -- "${tmpdir}"' EXIT TERM INT QUIT
+	ebegin "Mounting firmware partition"
+	mkdir -- "${tmpdir}/boot"
+	mount "${partition}" "${tmpdir}/boot" || { eend $? || return 1; }
+	a_b_mode=false
+	if [[ -e "${tmpdir}/boot/autoboot.txt" ]]; then
+		# Raspberry Pi autoboot.txt found. The system appears to use A/B
+		# firmware partitions. Get the partition numbers from the file and
+		# mount the B partition.
+		a_b_mode=true
+		partition_a="$(sed "${tmpdir}/boot/autoboot.txt" -ne '/\[all\]/,/\[.*\]/p' | sed -Ene 's/boot_partition=([0-9]+)/\1/ p')"
+		partition_b="$(sed "${tmpdir}/boot/autoboot.txt" -ne '/\[tryboot\]/,/\[.*\]/p' | sed -Ene 's/boot_partition=([0-9]+)/\1/ p')"
+		umount "${tmpdir}/boot"
+		mount "${partition%[0-9]}${partition_b}" "${tmpdir}/boot"
+	fi
+	eend $? || return 1
+	if [[ -n "${local_version_file}" ]]; then
+		if [[ "${local_version_file:0:1}" != / ]]; then
+			# $local_version_file is relative. Prepend firmware partition mount
+			# point to make it absolute.
+			local_version_file="${tmpdir}/boot/${local_version_file}"
+		fi
+		local_version="$(cat -- "${local_version_file}")"
+	fi
+	ebegin "Checking latest firmware version"
+	remote_version="$(wget -q -O- "${remote_version_url}")"
+	eend $? || return 1
+	if [[ -n "${local_version}" ]] && [[ "${local_version}" = "${remote_version}" ]]; then
+		# Local version is identical to remote version.
+		einfo "No newer firmware version found"
+		eend 0
+		return
+	fi
+	# shellcheck disable=SC2016
+	update_url="${update_url//'$version'/"${remote_version}"}"
+	ebegin "Getting firmware version ${remote_version}"
+	wget "${update_url}" -O "${tmpdir}/firmware.tar"
+	eend $? || return 1
+	ebegin "Unpacking firmware update"
+	tar -C "${tmpdir}" -xf "${tmpdir}/firmware.tar" || { eend $? || return 1; }
+	rm -f -- "${tmpdir}/firmware.tar"
+	eend $? || return 1
+	ebegin "Applying firmware update"
+	find "${tmpdir}" -type d -name boot -prune -o -type f -print | while read -r file; do
+		file="${file#"${tmpdir}/"}"
+		# Write only new and changed files to reduce the risk of file corruption.
+		skip=false
+		if [[ -e "${tmpdir}/boot/${file}" ]] && [[ "$(md5sum -- "${tmpdir}/boot/${file}" | cut -d ' ' -f 1)" = "$(md5sum -- "${tmpdir}/${file}" | cut -d ' ' -f 1)" ]]; then
+			skip=true
+		fi
+		if [[ "${skip}" = false ]]; then
+			cp "${tmpdir}/${file}" "${tmpdir}/boot/${file}" || return $?
+		fi
+	done
+	eend $? || return 1
+	umount "${tmpdir}/boot"
+	if [[ "${a_b_mode}" = true ]]; then
+		ebegin "Switching boot partitions"
+		mount "${partition}" "${tmpdir}/boot" || { eend $? || return 1; }
+		sed "${tmpdir}/boot/autoboot.txt" -i -e "/\[all\]/,/\[.*\]/ s/boot_partition=${partition_a}/boot_partition=${partition_b}/;/\[tryboot\]/,/\[.*\]/ s/boot_partition=${partition_b}/boot_partition=${partition_a}/" || { eend $? || return 1; }
+		umount "${tmpdir}/boot"
+		eend $? || return 1
+	fi
+}
